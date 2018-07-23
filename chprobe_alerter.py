@@ -102,6 +102,9 @@ def postJsonHandler():
         else: # Parse probe name and value
             alert_probe = d['evalMatches'][0]['metric']
             alert_value = d['evalMatches'][0]['value']
+
+            # Round to two deicmals max
+            alert_value = float(format(alert_value, '.2f'))
             print(alert_probe, alert_value) if verbose else None
 
             # Add some claryfing text to the values
@@ -112,7 +115,7 @@ def postJsonHandler():
                 alert_hvalue = str(alert_value) + 'ms RTT (avg)'
                   
             elif 'Loss' in alert_title:
-                alert_hvalue = str(alert_value) + '% (packetloss)'
+                alert_hvalue = str(alert_value) + '% packetloss'
 
     else:
         print('Dropped request with state:', alert_state)
