@@ -1,38 +1,41 @@
 #!/usr/bin/env python3
-# v0.2
 from flask import Flask
 from flask import request, session
 import urllib.request
 import time 
+import yaml
 
 # TODO
 # Make class for alert_ vars instead
 # Issues: Email notify sends multiple attachments
 # Handling of multiple probes in evalMatches list.. Currently only takes index 0
 
-verbose = True
-email_notify = False
-webhook_notify = True
+# Load config file
+with open('alerter_settings.yaml') as f:
+    try:
+        conf = yaml.safe_load(f)
+    except:
+        raise IOError('Fatal: Could not load the configuration file')
 
-## Settings
+# Parse settings
+try:
+    webhook_notify = conf['settings']['publisher']['mattermost']['enabled']
+    email_notify = conf['settings']['publisher']['email']['enabled']
+    hook_url = conf['settings']['publisher']['mattermost']['hook_url']
+    smtp_server = conf['settings']['publisher']['email']['smtp_server']
+    sender_address = conf['settings']['publisher']['email']['sender_address']
+    receiver_address = conf['settings']['publisher']['email']['receiver_address']
+    subject = conf['settings']['publisher']['email']['subject']
+    webdav_path = conf['settings']['general']['webdav_path']
+    grafana_webdav = conf['settings']['general']['grafana_webdav']
+    ext_charturl = conf['settings']['general']['ext_charturl']
+    grafana_testurl = conf['settings']['general']['grafana_testurl']
+    verbose = conf['settings']['general']['verbose']
+except:
+    raise KeyError('Fatal: Could not parse the configuration file')
 
-# Webhook url and key
-hook_url = '<webhook url here>'
-
-# Local path for grafanas upload dir
-webdav_path = '<upload path here>'
-
-# External path for grafanas (included in the POST)
-grafana_webdav = '<external path here>'
-
-# External url where the graphs are stored when pointing to them and not attaching them
-ext_charturl = '<chart url here>'
-
-# Grafana testing url
-grafana_testurl = 'http://grafana.org/assets/img/blog/mixed_styles.png'
-
-# SMTP server
-smtpserver = '127.0.0.1'
+# icmp deadline
+icmp_deadline = 100
 
 def load_graph(url):
     urllib.request.urlretrieve(url, 'test.png')
@@ -52,19 +55,18 @@ if email_notify:
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from email.mime.image import MIMEImage
-    strFrom = 'somesender@somedomain.dom'
-    strTo = 'somerecipient@somedomain.com'
+    strFrom = sender_address
+    strTo = receiver_address
     msgRoot = MIMEMultipart('related')
-    msgRoot['Subject'] = 'test message'
+    msgRoot['Subject'] = subject
     msgRoot['From'] = strFrom
     msgRoot['To'] = strTo
 
 elif webhook_notify:
     import requests
-# Create request and send it to MM webhook...
-
 
 app = Flask(__name__)
+app.secret_key = "something-from-os.urandom(24)"
  
 @app.route('/alert', methods = ['POST'])
 def postJsonHandler():
@@ -77,6 +79,32 @@ def postJsonHandler():
     alert_title = d['title']
     alert_rulename = d['ruleName']
     chart_url = d['imageUrl']
+    print(chart_url) if verbose else None
+    print (d) if verbose else None
+    print('Recieved alert state:',alert_state) if verbose else None
+
+# Parse settings from message
+# Script should still function without message settings.
+    try:
+        alert_settings = d['message']
+        message = True
+   
+    except KeyError: 
+        message = False
+        print('Warning: No message key was detected in the alert')
+    
+    if message:
+        try:
+            if isinstance(alert_settings,str):
+                alert_settings = eval(d['message'])
+            else:
+                alert_settings = d['message']
+            icmp_size = alert_settings['icmp_size'] if 'icmp_size' in alert_settings else None
+            icmp_interval = alert_settings['icmp_interval'] if 'icmp_interval' in alert_settings else None
+        except NameError:
+            message = False
+            print('Warning: alert settings (grafana message field) does not contain any known variables')
+
     print(chart_url) if verbose else None
     print (d) if verbose else None
     print('Recieved alert state:',alert_state) if verbose else None
@@ -115,7 +143,12 @@ def postJsonHandler():
                 alert_hvalue = str(alert_value) + 'ms RTT (avg)'
                   
             elif 'Loss' in alert_title:
-                alert_hvalue = str(alert_value) + '% packetloss'
+            # Check interval time from message field and use it to measure outage time
+                if icmp_deadline == 100 and message:
+                    outage_s = icmp_interval * alert_value
+                    alert_hvalue = str(alert_value) + '% packetloss (~{} seconds)'.format(int(outage_s))
+                else:
+                    alert_hvalue = str(alert_value) + '% packetloss'
 
     else:
         print('Dropped request with state:', alert_state)
@@ -144,10 +177,10 @@ def postJsonHandler():
 
 # Create and send the email
         try:
-            msgRoot.preamble = 'multi-part message in MIME format.'
+            msgRoot.preamble = 'This is a multi-part message in MIME format.'
             msgAlternative = MIMEMultipart('alternative')
             msgRoot.attach(msgAlternative)
-            msgText = MIMEText('alternative plain text message.')
+            msgText = MIMEText('This is the alternative plain text message.')
             msgAlternative.attach(msgText)
 #            msgText = MIMEText('<b>Alert for a probe <i>HTML</i> text</b> and an image.<br><img src="cid:image1"><br>Nifty!', 'html')
             mail_body = """\
@@ -172,7 +205,7 @@ Graph:<br>
 
 # Send the email (this example assumes SMTP authentication is required)
             smtp = smtplib.SMTP()
-            smtp.connect(smtpserver)
+            smtp.connect(smtp_server)
             smtp.sendmail(strFrom, strTo, msgRoot.as_string())
             smtp.quit()
             print ("Successfully sent email")
@@ -223,4 +256,4 @@ Check Grafana for further info: {} \n'.format(alert_localtime, alert_title, aler
             print('What we sent: ', json_input)
     return 'JSON posted'
  
-app.run(host='127.0.0.1', port= 8091, debug=True)
+app.run(host='127.0.0.1', port= 8091, debug=False)

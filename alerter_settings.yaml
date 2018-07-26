@@ -1,0 +1,18 @@
+# chprobe_alerter configuration file
+settings:
+    publisher:
+        mattermost:
+                enabled: True
+                hook_url: '<webhook url here>'
+        email:
+            enabled: False
+            smtp_server: '<smtp server>'
+            sender_address: '<somesender@somedomain.dom>'
+            receiver_address: '<somerecipient@somedomain.com>'
+            subject: '<email subject>'
+    general:
+        ext_charturl: '<chart url here>'
+        webdav_path: '<upload path here>'
+        grafana_webdav: '<external path here>'
+        grafana_testurl: 'http://grafana.org/assets/img/blog/mixed_styles.png'
+        verbose: False
